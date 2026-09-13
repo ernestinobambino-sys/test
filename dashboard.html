@@ -183,6 +183,18 @@ button{font-family:inherit}
 .scroll{overflow-y:auto; overscroll-behavior:contain}
 .scroll::-webkit-scrollbar{width:8px}
 .scroll::-webkit-scrollbar-thumb{background:var(--line-2); border-radius:8px; border:2px solid var(--panel)}
+.panel.full{grid-column:1/-1}
+.apps-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px}
+.appcard{background:var(--inset); border:1px solid var(--line); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:9px; min-width:0}
+.appcard.is-sample{opacity:.6}
+.appcard .top{display:flex; align-items:center; justify-content:space-between; gap:8px}
+.appcard .nm{font-family:'Bricolage Grotesque',sans-serif; font-weight:700; font-size:14px; overflow-wrap:anywhere; min-width:0}
+.appcard .metric{font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); font-weight:600}
+.appcard .big{font-family:'JetBrains Mono',monospace; font-variant-numeric:tabular-nums; font-size:23px; font-weight:600; line-height:1}
+.appcard .delta{font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:600}
+.appcard .delta.up{color:var(--good)} .appcard .delta.down{color:var(--bad)}
+.appcard .spark{height:40px}
+.appcard .logrow{display:flex; gap:6px; align-items:center}
 
 /* pills / chips */
 .pill{display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:700;
@@ -337,6 +349,10 @@ input:focus,textarea:focus,select:focus,.gsearch:focus{outline:none; border-colo
         <button class="icon-btn" id="themeBtn" title="Toggle light / dark" aria-label="Toggle theme">
           <span id="themeLabel">Theme</span>
         </button>
+        <button class="icon-btn" id="exportBtn" title="Download a backup of everything you've saved here" aria-label="Export my data" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+          Export
+        </button>
       </div>
       <div class="status" id="status">
         <span class="stat"><span class="dot" id="dot-Gmail" data-s="off"></span>Gmail</span>
@@ -416,6 +432,24 @@ input:focus,textarea:focus,select:focus,.gsearch:focus{outline:none; border-colo
         </div>
       </div>
       <div class="p-body scroll" id="projList" style="max-height:300px"></div>
+    </section>
+
+    <!-- APP PERFORMANCE -->
+    <section class="panel full" id="p-apps">
+      <div class="p-head">
+        <div class="p-title"><span class="p-mark sg"></span><h2>App Performance</h2></div>
+        <span class="p-meta" id="appsMeta">how your builds are doing</span>
+      </div>
+      <div class="field">
+        <input type="text" id="appName" placeholder="App / site name…" autocomplete="off" />
+        <select id="appPlatform" style="width:auto">
+          <option>Web</option><option>iOS</option><option>Android</option><option>Shopify</option><option>Content</option><option>Other</option>
+        </select>
+        <input type="text" id="appMetric" placeholder="Metric (Users, MRR, Views…)" autocomplete="off" style="flex:0 1 180px" />
+        <button class="btn sm" id="appAdd">Add app</button>
+      </div>
+      <div class="apps-grid" id="appsGrid"></div>
+      <div class="note">Log a number over time to watch each app's trend. Live auto-analytics can plug in here later — Shopify revenue once you reconnect it, vidIQ for content, or a web-analytics connector (Google Analytics / Plausible) once one is added in claude.ai.</div>
     </section>
 
     <!-- HEALTH -->
@@ -617,7 +651,10 @@ const SAMPLE = {
   proj:[ {name:'SnackRit-style app', status:'Building', note:'Inspired by SnackRit / Handoff — fast product handoff', sample:true},
          {name:'Store hero renders', status:'Live', note:'Higgsfield product shots for the shop', sample:true} ],
   vault:[ {title:'App store listing copy', body:'Saved draft of the tagline + keywords #idea', tags:['idea'], sample:true},
-          {title:'Server login note', body:'Where the deploy keys live #building', tags:['building'], sample:true} ]
+          {title:'Server login note', body:'Where the deploy keys live #building', tags:['building'], sample:true} ],
+  apps:[ {name:'Prowl', platform:'Web', metric:'Users', readings:[], sample:true},
+         {name:'SnagRadar', platform:'Web', metric:'Users', readings:[], sample:true},
+         {name:'Handoff', platform:'Web', metric:'Users', readings:[], sample:true} ]
 };
 /* snapshot of what's on-screen, fed to the Ask panel as context */
 let LATEST={inbox:[], tasks:SAMPLE.tasks, fin:SAMPLE.fin};
@@ -711,6 +748,51 @@ function renderProjects(items){
   $('#projMeta').textContent = items.some(p=>p.sample)?'example':(list.length+' tracked');
 }
 
+let appReadings={};
+function renderApps(items){
+  const box=$('#appsGrid'); box.textContent=''; appReadings={};
+  const list=[...items].sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  if(!list.length){ box.append(h('div',{class:'empty',style:{gridColumn:'1/-1'}}, h('b',{},'No apps tracked yet'),'Add an app and log a number to start a trend line.')); }
+  const NS='http://www.w3.org/2000/svg';
+  list.forEach(a=>{
+    const readings=Array.isArray(a.readings)?a.readings:[];
+    if(!a.sample) appReadings[a.id]=readings;
+    const vals=readings.map(r=>+r.value||0);
+    const last=vals.length?vals[vals.length-1]:null;
+    const prev=vals.length>1?vals[vals.length-2]:null;
+    const delta=(last!=null&&prev!=null)?last-prev:null;
+    const svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 300 56'); svg.setAttribute('preserveAspectRatio','none'); svg.setAttribute('class','spark');
+    const plat=a.platform||'App';
+    const card=h('div',{class:'appcard'+(a.sample?' is-sample':'')},
+      h('div',{class:'top'},
+        h('span',{class:'nm'}, a.name||'Untitled'),
+        h('span',{class:'pill'+(plat==='Shopify'?' warn':plat==='Content'?' cy':'')}, plat)),
+      h('div',{},
+        h('div',{class:'metric'}, a.metric||'Metric'),
+        h('div',{style:{display:'flex',alignItems:'baseline',gap:'8px'}},
+          h('span',{class:'big'}, last!=null?last.toLocaleString():'—'),
+          delta!=null?h('span',{class:'delta '+(delta>=0?'up':'down')}, (delta>=0?'▲':'▼')+' '+Math.abs(delta).toLocaleString()):null)),
+      svg,
+      a.sample ? h('span',{class:'pill sample'},'sample')
+        : h('div',{class:'logrow'},
+            h('input',{type:'number', placeholder:'log '+(a.metric||'value')+'…', id:'applog-'+a.id, style:{flex:'1',minWidth:'0'}}),
+            h('button',{class:'btn sm', onclick:()=>logApp(a.id)},'Log'),
+            h('button',{class:'iconbtn', onclick:()=>delDoc('apps',a.id),'aria-label':'delete'},
+              h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'2',width:'14',height:'14'}, h('path',{d:'M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13'})))));
+    box.append(card);
+    drawSpark(svg, vals.length?vals:[0,0]);
+  });
+  $('#appsMeta').textContent = items.some(a=>a.sample)?'example':(list.length?list.length+' tracked':'how your builds are doing');
+}
+async function logApp(id){
+  if(!DB){toast('Connecting…');return;}
+  const inp=$('#applog-'+id); const v=parseFloat(inp&&inp.value);
+  if(!(v||v===0)){ toast('Enter a number'); return; }
+  const readings=[...(appReadings[id]||[]), {date:todayKey(), value:v}];
+  try{ await DB.doc('apps/'+id).update({readings}); }catch(e){ toast('Could not log'); }
+}
+
 let vaultAll=[];
 function renderVault(items){
   vaultAll = items;
@@ -769,6 +851,9 @@ function wireDbInputs(){
   $('#projAdd').onclick=()=>{ const name=$('#projName').value.trim(); if(!name)return;
     add('projects',{name, status:$('#projStatus').value, note:$('#projNote').value.trim()},()=>{$('#projName').value='';$('#projNote').value='';}); };
 
+  $('#appAdd').onclick=()=>{ const name=$('#appName').value.trim(); if(!name)return;
+    add('apps',{name, platform:$('#appPlatform').value, metric:$('#appMetric').value.trim()||'Users', readings:[]},()=>{$('#appName').value='';$('#appMetric').value='';}); };
+
   $('#memAdd').onclick=()=>{ const title=$('#memTitle').value.trim(); if(!title)return;
     const body=$('#memBody').value.trim();
     const tags=[...new Set((title+' '+body).match(/#([a-z0-9_-]+)/gi)?.map(t=>t.slice(1).toLowerCase())||[])];
@@ -813,7 +898,7 @@ function renderWeek(days){
 /* ================= boot DB ================= */
 // paint examples at rest first
 renderTasks(SAMPLE.tasks); renderFinance(SAMPLE.fin); renderProjects(SAMPLE.proj); renderVault(SAMPLE.vault);
-renderWeek(new Set());
+renderApps(SAMPLE.apps); renderWeek(new Set());
 wireDbInputs();
 
 (async ()=>{
@@ -822,6 +907,7 @@ wireDbInputs();
   subCollection('tasks', renderTasks);
   subCollection('finances', renderFinance);
   subCollection('projects', renderProjects);
+  subCollection('apps', renderApps);
   subCollection('memory', renderVault);
   // health: today's doc + this week's logged days
   try{
@@ -1027,5 +1113,32 @@ $('#gsearch').addEventListener('input', e=>{
   input.addEventListener('keydown',e=>{ if(e.key==='Enter')send.click(); });
   stop.onclick=()=>ctl&&ctl.abort();
   $$('#askChips .chip').forEach(b=>b.onclick=()=>ask(PROMPTS[b.dataset.q]));
+})();
+
+/* ================= Export / backup (downloads capability) ================= */
+(async ()=>{
+  const dl = await use('downloads');
+  const btn = $('#exportBtn');
+  if(!dl || !btn) return;                       // capability absent → button stays hidden
+  btn.hidden = false;
+  btn.onclick = async ()=>{
+    if(!DB){ toast('Still connecting — try again in a second'); return; }
+    btn.disabled = true;
+    try{
+      const out = { app:'Command Deck', exportedAt:new Date().toISOString(), data:{} };
+      for(const c of ['tasks','finances','projects','memory','health']){
+        try{ const s = await DB.collection(c).get(); out.data[c] = s.docs.map(d=>({id:d.id, ...d.data()})); }
+        catch(e){ out.data[c] = []; }
+      }
+      try{ const p = await DB.doc('settings/profile').get(); if(p.exists) out.data.profile = p.data(); }catch(e){}
+      await dl.save({ filename:'command-deck-backup-'+todayKey()+'.json', data: JSON.stringify(out, null, 2) });
+      toast('Backup downloaded');
+    }catch(e){
+      const c = e && e.code;
+      if(c==='declined'){ /* viewer said no — stay quiet */ }
+      else if(c==='rate_limited'){ toast('Try again in a moment'); }
+      else toast('Could not export');
+    }finally{ btn.disabled = false; }
+  };
 })();
 </script>
